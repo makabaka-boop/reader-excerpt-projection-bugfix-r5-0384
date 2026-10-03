@@ -20,6 +20,11 @@ export function parseBook(jsonText: string): Book {
   } catch (e) {
     throw new BookParseError(`JSON 解析失败：${(e as Error).message}`);
   }
+  return bookFromUnknown(raw);
+}
+
+/** 校验已解析的 JSON 值是否为合法书稿（节选文件等场景复用同一套规则）。 */
+export function bookFromUnknown(raw: unknown): Book {
   const obj = asObject(raw);
   if (!obj) throw new BookParseError("书稿顶层必须是对象");
 

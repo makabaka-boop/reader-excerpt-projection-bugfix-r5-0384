@@ -108,8 +108,13 @@ export function useAnnotations() {
     );
   }, []);
 
-  const loadExcerpt = useCallback((pack: ExcerptPackage) => {
-    const checked = validateExcerpt(pack);
+  /**
+   * 打开节选文件：先整体严格校验，再一次性应用——非法文件不会写入
+   * 存储、不会改动当前状态（不留部分更新）。节选书稿 id 带节选标记，
+   * 与原书稿各自独立持久化，互不影响。
+   */
+  const loadExcerpt = useCallback((raw: unknown): ExcerptPackage => {
+    const checked = validateExcerpt(raw);
     const nextFlat = flattenBook(checked.book);
     storage.saveBook(checked.book);
     storage.saveAnnotations(checked.book.id, checked.annotations);
@@ -121,6 +126,7 @@ export function useAnnotations() {
       version: checked.book.version,
       counts: { anchored: checked.annotations.length, ambiguous: 0, lost: 0 },
     });
+    return checked;
   }, []);
 
   return useMemo(

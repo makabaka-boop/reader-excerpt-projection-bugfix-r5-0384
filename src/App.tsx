@@ -82,7 +82,7 @@ export default function App() {
       URL.revokeObjectURL(url);
       setError(null);
     } catch (e) {
-      setError(String(e));
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
   return (
@@ -160,13 +160,14 @@ export default function App() {
             const f = e.target.files?.[0];
             if (!f) return;
             try {
-              const pack = JSON.parse(await f.text());
-              ann.loadExcerpt(pack);
-              setChapterId(pack.book.chapters[0]?.id ?? null);
+              const checked = ann.loadExcerpt(JSON.parse(await f.text()));
+              setChapterId(checked.book.chapters[0]?.id ?? null);
               setShareRanges([]);
               setError(null);
             } catch (err) {
-              setError(String(err));
+              setError(
+                err instanceof Error ? err.message : `打开节选失败：${String(err)}`,
+              );
             }
             e.target.value = "";
           }}
