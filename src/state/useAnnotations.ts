@@ -9,7 +9,7 @@ import {
   resolveCandidate,
 } from "../text/anchor";
 import { ensureAnchored } from "../text/validate";
-import { storage } from "./storage";
+import { storage, type StorageScope } from "./storage";
 
 export interface ImportReport {
   version: string | undefined;
@@ -21,33 +21,38 @@ export function useAnnotations() {
   const [flat, setFlat] = useState<FlatBook | null>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [lastReport, setLastReport] = useState<ImportReport | null>(null);
+  const [scope, setScope] = useState<StorageScope>("book");
   const bookRef = useRef<Book | null>(null);
   const annotationsRef = useRef<Annotation[]>([]);
   annotationsRef.current = annotations;
 
-  // 持久化与内存状态同源：任何变更都写入 localStorage。
+  // 持久化与内存状态同源：任何变更都写入当前作用域的 localStorage。
+  // 完整书稿与节选分属不同键空间，节选的保存/编辑永远到不了原书稿。
   useEffect(() => {
-    if (book) storage.saveAnnotations(book.id, annotations);
-  }, [book, annotations]);
+    if (book) storage.saveAnnotations(book.id, annotations, scope);
+  }, [book, annotations, scope]);
 
   /**
    * 导入书稿。同书 id 但 version 变化视为「新版本」→ 全部按证据强制重锚；
    * 其余情况（首次载入、刷新后重载同一版本）坐标吻合的锚点直接保留，
-   * 不吻合的再按证据重锚。
+   * 不吻合的再按证据重锚。始终走完整书稿作用域，即使当前正在看节选。
    */
   const importBook = useCallback((next: Book) => {
     const prev = bookRef.current;
     const nextFlat = flattenBook(next);
     const isNewVersion =
       !!prev && prev.id === next.id && prev.version !== next.version;
+    // 新版本重锚基于内存中的现存批注；其余情况从完整书稿作用域恢复，
+    // 绝不会读到节选作用域里的批注。
     const source = isNewVersion
       ? annotationsRef.current
-      : (storage.loadAnnotations(next.id) ?? []);
+      : (storage.loadAnnotations(next.id, "book") ?? []);
     const restored = isNewVersion
       ? reanchorAll(source, nextFlat)
       : ensureAnchored(source, nextFlat);
 
-    storage.saveBook(next);
+    storage.saveBook(next, "book");
+    setScope("book");
     bookRef.current = next;
     setBook(next);
     setFlat(nextFlat);
@@ -108,19 +113,33 @@ export function useAnnotations() {
     );
   }, []);
 
-  const loadExcerpt = useCallback((pack: ExcerptPackage) => {
-    const checked = validateExcerpt(pack);
+  /**
+   * 打开节选分享文件。
+   *
+   * 先做完整严格校验（validateExcerpt 失败时抛 ExcerptError），通过后才
+   * 扁平化、落库、切换状态——校验阶段不触碰任何状态与 localStorage，
+   * 非法文件不会留下部分更新。节选以 excerpt 作用域独立保存，不覆盖原书稿；
+   * 节选中的批注全部已是「坐标与节选文字逐字一致」的已定位锚点，直接展示。
+   *
+   * @returns 校验通过的节选包（调用方可据此切换章节等 UI 状态）。
+   */
+  const loadExcerpt = useCallback((raw: unknown): ExcerptPackage => {
+    // 以下任一步抛错，本函数都不会产生任何副作用。
+    const checked = validateExcerpt(raw);
     const nextFlat = flattenBook(checked.book);
-    storage.saveBook(checked.book);
-    storage.saveAnnotations(checked.book.id, checked.annotations);
+
+    storage.saveBook(checked.book, "excerpt");
+    storage.saveAnnotations(checked.book.id, checked.annotations, "excerpt");
+    setScope("excerpt");
     bookRef.current = checked.book;
     setBook(checked.book);
     setFlat(nextFlat);
-    setAnnotations(checked.annotations);
+    setAnnotations(structuredClone(checked.annotations));
     setLastReport({
       version: checked.book.version,
       counts: { anchored: checked.annotations.length, ambiguous: 0, lost: 0 },
     });
+    return checked;
   }, []);
 
   return useMemo(
@@ -130,6 +149,7 @@ export function useAnnotations() {
       flat,
       annotations,
       lastReport,
+      scope,
       importBook,
       addAnnotation,
       updateNote,
@@ -143,6 +163,7 @@ export function useAnnotations() {
       flat,
       annotations,
       lastReport,
+      scope,
       importBook,
       addAnnotation,
       updateNote,

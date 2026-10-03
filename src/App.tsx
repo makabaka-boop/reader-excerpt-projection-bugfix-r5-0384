@@ -1,4 +1,4 @@
-import { buildExcerpt, type ExcerptRange } from "./excerpt";
+import { buildExcerpt, ExcerptError, type ExcerptRange } from "./excerpt";
 import { readSelection } from "./text/flatten";
 import { useCallback, useRef, useState } from "react";
 import { useAnnotations } from "./state/useAnnotations";
@@ -82,7 +82,11 @@ export default function App() {
       URL.revokeObjectURL(url);
       setError(null);
     } catch (e) {
-      setError(String(e));
+      setError(
+        e instanceof ExcerptError
+          ? e.message
+          : `导出节选失败：${(e as Error).message}`,
+      );
     }
   };
   return (
@@ -160,13 +164,18 @@ export default function App() {
             const f = e.target.files?.[0];
             if (!f) return;
             try {
-              const pack = JSON.parse(await f.text());
-              ann.loadExcerpt(pack);
-              setChapterId(pack.book.chapters[0]?.id ?? null);
+              const raw = JSON.parse(await f.text());
+              // 校验全部通过后才切换章节：非法文件不会留下部分更新。
+              const checked = ann.loadExcerpt(raw);
+              setChapterId(checked.book.chapters[0].id);
               setShareRanges([]);
               setError(null);
             } catch (err) {
-              setError(String(err));
+              setError(
+                err instanceof ExcerptError
+                  ? `节选文件无效：${err.message}`
+                  : `节选文件无效：${(err as Error).message}`,
+              );
             }
             e.target.value = "";
           }}
@@ -194,6 +203,11 @@ export default function App() {
         {ann.flat && (
           <nav className="toc">
             <h3>{ann.book?.title}</h3>
+            {ann.scope === "excerpt" && (
+              <div className="excerpt-badge" title="节选独立保存，编辑不会影响原书稿">
+                节选分享 · 编辑仅保存在此文件
+              </div>
+            )}
             {ann.book?.version && (
               <div className="version">版本 {ann.book.version}</div>
             )}
